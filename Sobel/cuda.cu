@@ -10,6 +10,7 @@
 #include "stb_image_write.h"
 
 #define SOBEL_KERNEL_SIZE 3
+#define TILE_SIZE 32  // Size of the shared memory tile
 
 __constant__ int sobel_kernel_x[SOBEL_KERNEL_SIZE][SOBEL_KERNEL_SIZE] = {{-1, 0, 1},
                                                                           {-2, 0, 2},
@@ -20,17 +21,42 @@ __constant__ int sobel_kernel_y[SOBEL_KERNEL_SIZE][SOBEL_KERNEL_SIZE] = {{-1, -2
                                                                           { 1,  2,  1}};
 
 __global__ void sobel_filter(unsigned char* input_image, unsigned char* output_image, int width, int height) {
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    __shared__ unsigned char shared_image[TILE_SIZE + 2][TILE_SIZE + 2];
 
-    if (x > 0 && x < width - 1 && y > 0 && y < height - 1) {
+    int tx = threadIdx.x;
+    int ty = threadIdx.y;
+    int x = blockIdx.x * TILE_SIZE + tx;
+    int y = blockIdx.y * TILE_SIZE + ty;
+
+    // Load data into shared memory
+    if (x < width && y < height) {
+        shared_image[ty + 1][tx + 1] = input_image[y * width + x];
+    }
+
+    // Load ghost rows/columns for Sobel filter
+    if (tx == 0 && x > 0) {
+        shared_image[ty + 1][0] = input_image[y * width + x - 1];
+    }
+    if (tx == TILE_SIZE - 1 && x < width - 1) {
+        shared_image[ty + 1][TILE_SIZE + 1] = input_image[y * width + x + 1];
+    }
+    if (ty == 0 && y > 0) {
+        shared_image[0][tx + 1] = input_image[(y - 1) * width + x];
+    }
+    if (ty == TILE_SIZE - 1 && y < height - 1) {
+        shared_image[TILE_SIZE + 1][tx + 1] = input_image[(y + 1) * width + x];
+    }
+
+    __syncthreads();
+
+    if (x < width && y < height) {
         int gradient_x = 0;
         int gradient_y = 0;
 
         for (int i = -1; i <= 1; i++) {
             for (int j = -1; j <= 1; j++) {
-                gradient_x += input_image[(y + i) * width + (x + j)] * sobel_kernel_x[i + 1][j + 1];
-                gradient_y += input_image[(y + i) * width + (x + j)] * sobel_kernel_y[i + 1][j + 1];
+                gradient_x += shared_image[ty + i + 1][tx + j + 1] * sobel_kernel_x[i + 1][j + 1];
+                gradient_y += shared_image[ty + i + 1][tx + j + 1] * sobel_kernel_y[i + 1][j + 1];
             }
         }
 
@@ -78,8 +104,8 @@ int main() {
         return 1;
     }
 
-    dim3 blockDim(2, 2);
-    dim3 gridDim((width + blockDim.x - 1) / blockDim.x, (height + blockDim.y - 1) / blockDim.y);
+    dim3 blockDim(TILE_SIZE, TILE_SIZE);
+    dim3 gridDim((width + TILE_SIZE - 1) / TILE_SIZE, (height + TILE_SIZE - 1) / TILE_SIZE);
 
     printf("Launching CUDA kernel with gridDim=(%d, %d) blockDim=(%d, %d)\n", gridDim.x, gridDim.y, blockDim.x, blockDim.y);
 
