@@ -10,7 +10,7 @@
 #include "stb_image_write.h"
 
 #define SOBEL_KERNEL_SIZE 3
-#define TILE_SIZE 32  // Size of the shared memory tile
+#define TILE_SIZE 32  
 
 __constant__ int sobel_kernel_x[SOBEL_KERNEL_SIZE][SOBEL_KERNEL_SIZE] = {{-1, 0, 1},
                                                                           {-2, 0, 2},
@@ -28,12 +28,12 @@ __global__ void sobel_filter(unsigned char* input_image, unsigned char* output_i
     int x = blockIdx.x * TILE_SIZE + tx;
     int y = blockIdx.y * TILE_SIZE + ty;
 
-    // Load data into shared memory
+    
     if (x < width && y < height) {
         shared_image[ty + 1][tx + 1] = input_image[y * width + x];
     }
 
-    // Load ghost rows/columns for Sobel filter
+    
     if (tx == 0 && x > 0) {
         shared_image[ty + 1][0] = input_image[y * width + x - 1];
     }
